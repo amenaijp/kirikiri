@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     loop {
         match listener.accept().await {
             Ok((socket, _client_addr)) => {
-                spawn_and_log_error(serve_socks5(opt, socket));
+                spawn_and_log_error(proxy_requests(opt, socket));
             }
             Err(err) => {
                 error!("accept error = {:?}", err);
@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn serve_socks5(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> {
+async fn proxy_requests(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> {
     let (proto, cmd, target_addr) = Socks5ServerProtocol::accept_no_auth(socket)
         .await?
         .read_command()
