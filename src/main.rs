@@ -36,7 +36,12 @@ fn parse_duration(s: &str) -> Result<Duration, ParseFloatError> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
+        )
+        .init();
 
     let opt: &'static Opt = Box::leak(Box::new(Opt::from_args()));
 
