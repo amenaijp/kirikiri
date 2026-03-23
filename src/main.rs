@@ -4,11 +4,12 @@ use fast_socks5::{
     ReplyError, Result, Socks5Command, SocksError, server::Socks5ServerProtocol,
     util::target_addr::TargetAddr,
 };
+use std::future::Future;
 use std::num::ParseFloatError;
 use std::time::Duration;
-use std::future::Future;
 use structopt::StructOpt;
 use tokio::io::AsyncReadExt;
+use std::io::IoSlice;
 use tokio::net::TcpStream;
 use tokio::{io::AsyncWriteExt, net::TcpListener, task};
 use tracing::{error, info};
@@ -35,6 +36,8 @@ fn parse_duration(s: &str) -> Result<Duration, ParseFloatError> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
     let opt: &'static Opt = Box::leak(Box::new(Opt::from_args()));
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
@@ -86,6 +89,7 @@ async fn proxy_requests(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> 
 
     let mut buf = vec![0u8; 1024 * 16];
     let n = inbound.read(&mut buf).await.map_err(SocksError::Io)?;
+    info!("First request is {} bytes", n);
     if n == 0 {
         return Ok(());
     }
@@ -103,9 +107,7 @@ async fn proxy_requests(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> 
             // Handle http
             info!("Segmenting request as http...");
             outbound.write(&buf[..1]).await.map_err(SocksError::Io)?; // Write the first byte
-            outbound.flush().await.map_err(SocksError::Io)?;
             outbound.write(&buf[1..n]).await.map_err(SocksError::Io)?;
-            outbound.flush().await.map_err(SocksError::Io)?;
         },
         // the TLS case: the first byte is 0x16, signifying TLS
         0x16 => {
@@ -172,26 +174,21 @@ async fn proxy_requests(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> 
                 buf[3] = (first_buffer_size >> 8) as u8;
                 buf[4] = (first_buffer_size & 0xff) as u8;
                 let second_buffer_header: [u8; 5] = [0x16, 0x03, tls_version_minor, (second_buffer_size >> 8) as u8, (second_buffer_size & 0xff) as u8];
-                outbound.write(&buf[..i]).await.map_err(SocksError::Io)?; // write up to the SNI
-                outbound.flush().await.map_err(SocksError::Io)?;
-                outbound.write(&second_buffer_header).await.map_err(SocksError::Io)?; // write the new 5 byte TLS header
-                outbound.write(&buf[i..n]).await.map_err(SocksError::Io)?; // write the rest of the record
-                outbound.flush().await.map_err(SocksError::Io)?; // flush again
+                outbound.write_vectored(&[IoSlice::new(&buf[..i]), IoSlice::new(&second_buffer_header), IoSlice::new(&buf[i..n])]).await.map_err(SocksError::Io)?; // write up to the SNI
                 successfully_segmented = true;
             };
             info!("successfully segmented: {}", successfully_segmented);
 
             if !successfully_segmented {
                 outbound.write(&buf[..n]).await.map_err(SocksError::Io)?;
-                outbound.flush().await.map_err(SocksError::Io)?;
             }
         },
         _ => {
             outbound.write(&buf[..n]).await.map_err(SocksError::Io)?;
-            outbound.flush().await.map_err(SocksError::Io)?;
         }
     }
 
+    info!("Proxying...");
     tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await?;
     Ok(())
 }
