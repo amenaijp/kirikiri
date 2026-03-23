@@ -1,38 +1,107 @@
-name: Build
+name: Build & Release
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
+    tags:
+      - 'v*'
 
 jobs:
   build:
+    name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cmd: cargo
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cmd: cross
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cmd: cargo
+
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            cmd: cargo
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cmd: cargo
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo install cross
-      - run: cargo build --release --target ${{ matrix.target }}
-        if: ${{ !contains(matrix.target, 'aarch64-unknown-linux') }}
-      - run: cross build --release --target ${{ matrix.target }}
-        if: ${{ contains(matrix.target, 'aarch64-unknown-linux') }}
-      - uses: actions/upload-artifact@v3
+
+      - name: Install cross
+        if: matrix.cmd == 'cross'
+        uses: taiki-e/install-action@v2
         with:
-          name: ${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/
+          tool: cross
+
+      # Windows ARM64 needs the MSVC ARM64 build tools component installed separately.
+      # This step is slow (~5 min) but only runs for the aarch64-pc-windows-msvc target.
+      - name: Install ARM64 MSVC build tools
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify `
+            --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" `
+            --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            --quiet --norestart --force
+
+      - name: Build
+        run: ${{ matrix.cmd }} build --release --target ${{ matrix.target }}
+
+      # Rename so all 5 binaries have distinct names when merged into one flat directory.
+      - name: Rename binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/kirikiri.exe" \
+               "kirikiri-${{ matrix.target }}.exe"
+          else
+            cp "target/${{ matrix.target }}/release/kirikiri" \
+               "kirikiri-${{ matrix.target }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kirikiri-${{ matrix.target }}
+          path: kirikiri-${{ matrix.target }}*   # matches with or without .exe
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download all 5 build artifacts into a single flat directory.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Produce a clean source snapshot (excludes .git, respects .gitattributes).
+      - name: Create source archives
+        run: |
+          git archive --format=tar.gz -o kirikiri-${{ github.ref_name }}-source.tar.gz HEAD
+          git archive --format=zip    -o kirikiri-${{ github.ref_name }}-source.zip    HEAD
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+            kirikiri-*-source.tar.gz
+            kirikiri-*-source.zip
