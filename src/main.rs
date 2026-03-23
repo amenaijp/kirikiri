@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
 
-    println!("Listening for SOCKS5 connections at {}", &opt.listen_addr);
+    println!("Listening for SOCKS5 proxy connections at {} (you may have to change your browser settings)", &opt.listen_addr);
 
     loop {
         match listener.accept().await {
