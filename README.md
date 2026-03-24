@@ -20,7 +20,7 @@ cargo run
 ## Usage
 ```
 $ kirikiri --help
-kirikiri 0.1.2
+kirikiri 0.1.3
 A minimal proxy that performs DPI evasion by modifying HTTP and TlS packets sent over it
 
 USAGE:
