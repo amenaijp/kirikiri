@@ -1,6 +1,6 @@
 [package]
 name = "kirikiri"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 
 [dependencies]
@@ -14,6 +14,10 @@ tracing-subscriber = { version="0.3.23", features = ["env-filter"] }
 [[bin]]
 name = "kirikiri"
 path = "src/main.rs"
+
+[profile.release]
+lto = "fat" # full cross-crate inlining/optimization
+codegen-units = 1
 
 # while desktop aarch64 usually uses 4k page size, apple silicon needs 16k and some weirder systems need 64k
 # by setting the page size to 64k all of these systems work with the same binary
