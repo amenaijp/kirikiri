@@ -5,11 +5,11 @@ use fast_socks5::{
     util::target_addr::TargetAddr,
 };
 use std::future::Future;
+use std::io::IoSlice;
 use std::num::ParseFloatError;
 use std::time::Duration;
 use structopt::StructOpt;
 use tokio::io::AsyncReadExt;
-use std::io::IoSlice;
 use tokio::net::TcpStream;
 use tokio::{io::AsyncWriteExt, net::TcpListener, task};
 use tracing::{error, info};
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
 
@@ -47,7 +47,10 @@ async fn main() -> Result<()> {
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
 
-    println!("Listening for SOCKS5 proxy connections at {} (you may have to change your browser settings)", &opt.listen_addr);
+    println!(
+        "Listening for SOCKS5 proxy connections at {} (you may have to change your browser settings)",
+        &opt.listen_addr
+    );
 
     loop {
         match listener.accept().await {
@@ -150,7 +153,7 @@ async fn proxy_requests(opt: &Opt, socket: TcpStream) -> Result<(), SocksError> 
                     i += 2;
                     extension_length = (buf[i] as u16) << 8 | buf[i + 1] as u16; // read length
                     i += 2;
-                    if extension_type == 0x0000 { break 'walk_extensions; } // SNI's extension type; i now points to the first byte of the data and the length is above
+                    if extension_type == 0x0000 { break 'walk_extensions; } // SNI's extension type; `i` now points to the first byte of the data and the length is above
                     i += extension_length as usize;
                     if n <= (i + 3) || record_length as usize <= i - 2 { break 'segment; } // checks we can read the next four bytes
                 }
@@ -205,6 +208,13 @@ where
     task::spawn(async move {
         match fut.await {
             Ok(()) => {}
+            Err(SocksError::Io(io_err)) => match io_err.kind() {
+                // a lot of server software sends RST instead of a graceful FIN/ACK, causing connection reset errors on Windows
+                // particularly and linux to a lesser extent; broken pipe happens when the connection closes while we were still
+                // writing to the socket and can too be safely ignored
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe => {}
+                _ => error!("{:#}", io_err),
+            },
             Err(err) => error!("{:#}", &err),
         }
     })
