@@ -20,7 +20,7 @@ cargo run
 ## Usage
 ```
 $ kirikiri --help
-kirikiri 0.1.1
+kirikiri 0.1.2
 A minimal proxy that performs DPI evasion by modifying HTTP and TlS packets sent over it
 
 USAGE:
@@ -38,7 +38,7 @@ Most users will be fine simply running `kirikiri`, which starts a SOCKS5 proxy r
 
 Then, update your browser settings (search for 'proxy') to use a manually defined proxy. The proxy is at `localhost` or `127.0.0.1` (either works), and the port is `1080`. 
 
-If desired, debug information can be viewed using `RUST_LOG=info`
+If desired, debug information can be viewed using `RUST_LOG=info`. `kirikiri` will probably log a lot of errors during normal usage, and that's okay! Many of these are external to `kirikiri` and can safely be ignored, but if you really don't want to see those errors, use `RUST_LOG=off`.
 
 ## License
 `kirikiri` is provided under the terms of the MIT license.
